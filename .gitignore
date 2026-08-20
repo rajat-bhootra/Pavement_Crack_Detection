@@ -1,0 +1,42 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.so
+
+# Environment / local configuration
+.env
+.env.*
+
+# Training outputs
+runs/
+
+# Model weights / exported models
+models/*.pt
+models/*.onnx
+*.pt
+*.onnx
+
+# Processed dataset images and labels
+datasets/pavement/images/
+datasets/pavement/labels/
+
+# Dataset caches
+*.cache
+
+# Large downloaded archives
+*.zip
+*.tar
+*.tar.gz
+*.7z
+
+# Large local packages
+*.whl
+
+# IDE / editor files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
