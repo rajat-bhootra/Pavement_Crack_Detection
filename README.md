@@ -17,9 +17,12 @@ Phone camera image/video
   → Severity analysis
 ```
 
-**Current completed stage:** YOLO dataset preparation (bounding‑box YOLO‑v8 data).
+**Current completed stages:**
+- YOLO dataset preparation (bounding-box YOLO data).
+- Local YOLO environment validation.
+- A 1-epoch YOLO smoke test on the local RTX 2050, including validation and run artifacts.
 
-**Stages not yet implemented:** SAM segmentation, calibration, measurement, severity estimation.
+**Stages not yet implemented:** Full YOLO training, SAM/SAM2 segmentation, calibration, measurement, severity estimation.
 
 ---
 
@@ -56,12 +59,10 @@ Pavement_Crack_Detection/
 
 | Component | Minimum version / note |
 |-----------|------------------------|
-| **OS** | Ubuntu / Kubuntu (amd64) |
 | **Python** | 3.12.14 (managed by pyenv) |
 | **pyenv** | used to select Python 3.12.14 |
 | **virtual environment** | `.venv` (created with `python -m venv .venv`) |
 | **PyTorch** | 2.11.0 + cu128 (runtime CUDA 12.8) |
-| **CUDA‑enabled NVIDIA GPU** | RTX 2050 (4 GB VRAM) |
 | **NVIDIA driver** | 595.84 |
 | **Ultralytics YOLO** | 8.4.122 |
 
@@ -96,8 +97,6 @@ python -c "import ultralytics; print(ultralytics.__version__)"
 python -c "import torch; print('CUDA available:', torch.cuda.is_available())
 print('Device:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU')"
 ```
-
-> **Important:** The local machine currently has a PyTorch / CUDA runtime problem – importing PyTorch can produce a SIGBUS crash involving `libcusparseLt` / `libcusparse`. If you encounter the same issue, the recommended next step is to use the institute HPC / GPU cluster. The machine can still be used for development, dataset inspection, preprocessing, Git, visualization, and inference / testing.
 
 ---
 
@@ -210,34 +209,6 @@ The processed train/validation counts come from running the conversion script on
 
 ---
 
-## Git / repository rules
-
-**Tracked (commit)**:
-
-- `README.md`
-- `.gitignore`
-- `.python-version`
-- `datasets/pavement/data.yaml`
-- Source scripts and tools (`scripts/`, `tools/`, `.gitkeep` files)
-- Model configuration / code
-
-**Do NOT commit**:
-
-- The 13 + GB RDD2022 ZIP archive
-- Extracted raw RDD2022 dataset
-- Generated image datasets that make the repo unnecessarily large
-- `.venv/`
-- Python cache files (`__pycache__/`, `.pyc`)
-- `runs/` (training outputs)
-- Large pretrained/model weight files (`*.pt`, `*.onnx`)
-- `.env` files
-- IDE/editor temporary files
-- OS temporary files (`*.swp`, `*.swo`, `*~`)
-
-The dataset must be downloaded separately following the instructions above.
-
----
-
 ## Intended future pipeline
 
 ```text
@@ -250,20 +221,33 @@ Phone camera image/video
   → Final testing on phone‑video
 ```
 
-Each stage will depend on the successful completion of the previous one. At present only the YOLO detection stage (bounding‑box dataset) is ready.
+Each stage will depend on the successful completion of the previous one. At present the YOLO detection pipeline is ready for experimentation: the dataset has been prepared and the local training/validation pipeline has passed a 1-epoch smoke test. Full training and the later segmentation/measurement stages remain to be completed.
 
 ---
 
 ## Training
 
-**TRAINING HAS NOT BEEN SUCCESSFULLY COMPLETED YET.**
+### Local environment status
 
-The first local training attempt caused system freezes / resource pressure, and a subsequent PyTorch import produced a SIGBUS crash involving CUDA libraries (`libcusparseLt`, `libcusparse`). Therefore:
+The local CUDA/PyTorch issue has been resolved sufficiently for YOLO execution.
 
-- Do **not** claim that GPU training works on this machine.
-- The recommended next step is to use the institute HPC / GPU cluster if access is granted, because the laptop has only 4 GB VRAM and ~8 GB system RAM.
+Verified locally:
 
-If you still want a minimal smoke test on the local GPU, use the following **example command** (label it as a smoke test, not a completed result):
+- **GPU:** NVIDIA GeForce RTX 2050 (4 GB VRAM)
+- **NVIDIA driver:** 610.43.02
+- **CUDA UMD version reported by `nvidia-smi`:** 13.3
+- **PyTorch:** 2.11.0+cu128
+- **PyTorch CUDA runtime:** 12.8
+- **Torchvision:** 0.26.0+cu128
+- **Ultralytics:** 8.4.122
+- `torch.cuda.is_available()` → `True`
+- YOLO detects the RTX 2050 successfully.
+
+The earlier SIGBUS problem was traced to a corrupted/incomplete `libcusparseLt.so.0` in the Python environment. Reinstalling the cuSPARSELt package replaced the damaged 42 MB library with a valid ~432 MB library. PyTorch can now be imported and CUDA is available.
+
+### Local YOLO smoke test — completed
+
+A conservative 1-epoch smoke test was successfully run on the RTX 2050 using:
 
 ```bash
 yolo detect train \
@@ -275,14 +259,135 @@ yolo detect train \
     workers=0 \
     device=0 \
     project=runs/pavement \
-    name=yolov8n_smoke
+    name=smoke_test-2
 ```
 
-- Start conservatively (small model, small input size, batch = 1, `workers=0`).
-- Only increase image size, batch size, epochs, or model size after you confirm the smoke test runs without crashes.
-- Final training parameters should be selected based on the HPC GPU’s available VRAM.
+The run completed:
 
-After a successful training run, Ultralytics creates a run directory under `runs/pavement/` and checkpoint files such as `weights/best.pt` and `weights/last.pt`.
+- Training images scanned: **6,944**
+- Validation images scanned: **762**
+- Corrupt images: **0**
+- Epochs: **1/1**
+- Training time: **~11 min 54 sec**
+- Validation time: **~24.6 sec**
+- GPU memory reported by Ultralytics: **~0.152 GB**
+- Validation mAP50: **0.0211**
+- Validation mAP50-95: **0.00641**
+
+Class-wise validation results:
+
+| Class | Images | Instances | Precision | Recall | mAP50 | mAP50-95 |
+|---|---:|---:|---:|---:|---:|---:|
+| longitudinal_crack | 112 | 156 | 0.00461 | 0.423 | 0.00832 | 0.00233 |
+| transverse_crack | 1 | 1 | 0.00000 | 0.000 | 0.00000 | 0.00000 |
+| alligator_crack | 168 | 199 | 0.00847 | 0.794 | 0.0678 | 0.0211 |
+| pothole | 148 | 300 | 0.00464 | 0.417 | 0.00823 | 0.00219 |
+| **all** | **762** | **656** | **0.00443** | **0.408** | **0.0211** | **0.00641** |
+
+This is **only a smoke test**, not the final model. One epoch with `imgsz=320` is useful for verifying the complete training/validation pipeline, but the resulting metrics are not representative of final model performance.
+
+### Smoke-test artifacts
+
+The completed run was saved under:
+
+```text
+runs/detect/runs/pavement/smoke_test-2/
+```
+
+Important artifacts include:
+
+```text
+runs/detect/runs/pavement/smoke_test-2/
+├── labels.jpg
+├── weights/
+│   ├── best.pt
+│   └── last.pt
+└── ...
+```
+
+`labels.jpg` contains a visualization of the **ground-truth dataset bounding boxes and labels** generated during training setup. It is not model prediction output.
+
+To view it:
+
+```bash
+xdg-open runs/detect/runs/pavement/smoke_test-2/labels.jpg
+```
+
+The checkpoint from this smoke test can be used for a quick inference test, but it should **not** be treated as a final trained model.
+
+### Full training status
+
+**Full YOLO training has NOT been completed yet.**
+
+The next step is to perform proper multi-epoch training on the institute HPC cluster. The local RTX 2050 has only 4 GB VRAM and approximately 8 GB system RAM, making the HPC GPUs much more suitable for final experiments.
+
+---
+
+## HPC / GPU cluster access
+
+Institute HPC access is now available through the Slurm-managed Bhavani GPU cluster.
+
+### Important usage rule
+
+The login/master node must **not** be used for GPU jobs or training. GPU work must be submitted/run through Slurm on a GPU node. Jobs accidentally run on the master node may be killed by the cluster administrators.
+
+Example interactive GPU allocation:
+
+```bash
+srun --partition=gpu01 --gres=gpu:1 --ntasks=1 --pty bash
+```
+
+After allocation, the shell runs on a compute node and GPU commands such as `nvidia-smi` are valid.
+
+### Verified GPU partitions
+
+The following GPU partitions were tested successfully:
+
+| Partition | Node | GPU(s) | VRAM per GPU | Time limit |
+|---|---|---|---:|---|
+| `gpu01` | `node001` | 2 × NVIDIA A30 | 24 GB | 1 day |
+| `gpu02` | `node002` | 2 × NVIDIA A30 | 24 GB | 1 day |
+| `gpu03` | `node003` | 2 × NVIDIA A30 | 24 GB | 5 days |
+| `gpu04` | `node004` | 2 × NVIDIA L40 | ~46 GB | 1 day |
+
+The cluster currently reports NVIDIA driver **530.30.02** and CUDA **12.1** on these compute nodes.
+
+`nvidia-smi` was successfully verified on all four GPU partitions.
+
+The master node itself does not expose a usable NVIDIA GPU to the user, which is expected for a login/master node.
+
+### Recommended HPC strategy
+
+For final YOLO experiments:
+
+1. Clone the repository on the HPC.
+2. Set up the Python environment on a compute node or using the cluster's supported software modules.
+3. Keep the raw RDD2022 archive and generated dataset outside Git.
+4. Run preprocessing if the processed dataset is not already available.
+5. Start with `gpu01`/`gpu02`/`gpu03` using an A30 (24 GB).
+6. Prefer `gpu04` if an L40 allocation is available and larger experiments are required.
+7. Use Slurm for all training jobs; do not train on `master`.
+8. Save checkpoints and training results under `runs/`, which remains ignored by Git.
+
+The final training configuration (model size, `imgsz`, batch size, epochs, workers, and augmentation) should be selected after a short HPC benchmark because the A30 and L40 have substantially more VRAM than the local RTX 2050.
+
+A typical future Slurm/YOLO command will be based on:
+
+```bash
+yolo detect train \
+    data=datasets/pavement/data.yaml \
+    model=yolov8n.pt \
+    epochs=<planned-epochs> \
+    imgsz=<planned-image-size> \
+    batch=<batch-size> \
+    device=0 \
+    project=runs/pavement \
+    name=<experiment-name>
+```
+
+The exact values should be finalized after the first HPC smoke test.
+
+
 
 ---
 
@@ -300,11 +405,15 @@ The project currently does **not** have a trained checkpoint; inference can be s
 
 ---
 
-## Current hardware
+## Current local hardware
 
-- **GPU:** NVIDIA GeForce RTX 2050 (4 GB VRAM)
-- **System RAM:** approximately 8 GB
-- **OS:** Kubuntu / Ubuntu‑based Linux (amd64)
+- **CPU:** 12th Gen Intel Core i5-12450H, 12 logical CPUs
+- **GPU:** NVIDIA GeForce RTX 2050 (4 GB VRAM)
+- **System RAM:** approximately 8 GB
+- **OS:** Kubuntu / Ubuntu-based Linux (amd64)
+- **NVIDIA driver:** 610.43.02
+- **System CUDA toolkit:** 13.3
+- **PyTorch CUDA runtime:** 12.8
 
 ---
 
@@ -315,20 +424,10 @@ The project currently does **not** have a trained checkpoint; inference can be s
 - RDD2022 is useful for initial defect detection but does **not** by itself provide all information required for physical crack measurement or severity estimation.
 - SAM / SAM2 will require additional segmentation‑oriented data / validation.
 - Real‑world measurement / calibration will eventually require our own phone‑camera data and a dedicated calibration methodology.
-- The local RTX 2050 has only **4 GB VRAM**.
-- Local PyTorch / CUDA currently has a SIGBUS issue; an HPC GPU cluster is the preferred training environment.
+- The local RTX 2050 has only **4 GB VRAM**.
+- The previous local PyTorch SIGBUS issue has been resolved, and the local YOLO/CUDA stack is now working.
+- Despite this, the HPC GPU cluster is the preferred environment for full training because its A30/L40 GPUs provide substantially more VRAM.
 
 ---
-
-## Style
-
-- Clear headings, concise explanations, code blocks, and tables where useful.
-- Checklists for project status.
-- Do **not** make the README excessively long.
-- Do **not** claim that training has completed, that SAM / measurement / severity has been implemented, or that the four classes are the only classes in the original RDD2022 India annotations.
-- Do **not** expose large dataset files as Git‑tracked requirements.
-- Make sure the README describes the **actual current state** of the repository.
-
---- 
 
 *End of README*
