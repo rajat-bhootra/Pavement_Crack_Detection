@@ -39,4 +39,7 @@ datasets/pavement/labels/
 
 # OS files
 .DS_Store
-Thumbs.dblogs/
+Thumbs.db
+
+# Logs
+logs/
