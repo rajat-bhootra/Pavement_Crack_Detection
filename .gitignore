@@ -40,3 +40,9 @@ datasets/pavement/labels/
 # OS files
 .DS_Store
 Thumbs.dblogs/
+
+# Local analysis / visualization artifacts
+baseline_diagnostics/
+false_positive_analysis/
+predictions/
+*_montage.jpg
