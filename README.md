@@ -19,10 +19,13 @@ Phone camera image/video
 
 **Current completed stages:**
 - YOLO dataset preparation (bounding-box YOLO data).
-- Local YOLO environment validation.
-- A 1-epoch YOLO smoke test on the local RTX 2050, including validation and run artifacts.
+- Local YOLO environment validation and 1-epoch smoke test.
+- HPC/Slurm GPU environment setup and verification.
+- HPC YOLOv8n smoke test and AutoBatch benchmark.
+- **100-epoch YOLOv8n baseline training on an NVIDIA A30.**
+- Visual inference on 20 validation images using the trained `best.pt` checkpoint.
 
-**Stages not yet implemented:** Full YOLO training, SAM/SAM2 segmentation, calibration, measurement, severity estimation.
+**Stages not yet implemented:** SAM/SAM2 segmentation, camera/road-plane calibration, physical measurement, severity estimation.
 
 ---
 
@@ -315,17 +318,188 @@ xdg-open runs/detect/runs/pavement/smoke_test-2/labels.jpg
 
 The checkpoint from this smoke test can be used for a quick inference test, but it should **not** be treated as a final trained model.
 
-### Full training status
+### Full YOLOv8n baseline training — completed
 
-**Full YOLO training has NOT been completed yet.**
+The first complete baseline experiment was trained manually through a Slurm interactive GPU allocation on `node002` using one NVIDIA A30.
 
-The next step is to perform proper multi-epoch training on the institute HPC cluster. The local RTX 2050 has only 4 GB VRAM and approximately 8 GB system RAM, making the HPC GPUs much more suitable for final experiments.
+GPU allocation:
 
----
+```bash
+srun --partition=gpu02 \
+     --gres=gpu:1 \
+     --ntasks=1 \
+     --cpus-per-task=4 \
+     --mem=16G \
+     --time=23:00:00 \
+     --pty bash
+```
 
-## HPC / GPU cluster access
+On the compute node:
 
-Institute HPC access is now available through the Slurm-managed Bhavani GPU cluster.
+```bash
+source /home/apps/anaconda/anaconda3/etc/profile.d/conda.sh
+conda activate pavement
+cd ~/Pavement_Crack_Detection
+
+export YOLO_CONFIG_DIR="$HOME/.config/Ultralytics"
+mkdir -p "$YOLO_CONFIG_DIR"
+```
+
+Full training command:
+
+```bash
+yolo detect train \
+    data=datasets/pavement/data.yaml \
+    model=models/yolov8n.pt \
+    epochs=100 \
+    imgsz=640 \
+    batch=-1 \
+    device=0 \
+    workers=4 \
+    project=runs/pavement \
+    name=yolov8n_baseline-2 \
+    pretrained=true \
+    seed=0 \
+    deterministic=true \
+    amp=true
+```
+
+Training completed successfully in approximately **1.035 hours**.
+
+Final validation of the best checkpoint:
+
+| Metric | Result |
+|---|---:|
+| Precision | **0.505** |
+| Recall | **0.617** |
+| mAP50 | **0.599** |
+| mAP50-95 | **0.255** |
+
+Per-class results:
+
+| Class | Images | Instances | Precision | Recall | mAP50 | mAP50-95 |
+|---|---:|---:|---:|---:|---:|---:|
+| longitudinal_crack | 112 | 156 | 0.487 | 0.385 | 0.360 | 0.169 |
+| transverse_crack | 1 | 1 | 0.398 | 1.000 | 0.995 | 0.398 |
+| alligator_crack | 168 | 199 | 0.583 | 0.633 | 0.601 | 0.290 |
+| pothole | 148 | 300 | 0.552 | 0.450 | 0.441 | 0.162 |
+| **all** | **762** | **656** | **0.505** | **0.617** | **0.599** | **0.255** |
+
+**Important:** the transverse-crack validation set contains only one instance, so its per-class metrics are not statistically meaningful.
+
+Best checkpoint:
+
+```text
+~/Pavement_Crack_Detection/runs/detect/runs/pavement/yolov8n_baseline-2/weights/best.pt
+```
+
+### HPC environment used
+
+| Component | Verified value |
+|---|---|
+| Compute node | `node002` |
+| GPU partition | `gpu02` |
+| GPU | NVIDIA A30 |
+| GPU VRAM | 24 GB |
+| Driver | 530.30.02 |
+| Cluster CUDA | 12.1 |
+| Python | 3.12.14 |
+| PyTorch | 2.5.1+cu121 |
+| Torchvision | 0.20.1+cu121 |
+| Ultralytics | 8.4.122 |
+| CUDA available | `True` |
+
+The compute node has no external DNS/internet access. Therefore, the compatible PyTorch and Python dependency wheels were prepared locally, transferred to HPC, and installed offline. The working PyTorch stack uses CUDA 12.1 wheels; incompatible/newer CUDA 13 wheels were not installed.
+
+### HPC environment setup
+
+The dedicated Conda environment was created from the cluster's Anaconda installation:
+
+```bash
+source /home/apps/anaconda/anaconda3/etc/profile.d/conda.sh
+conda create -n pavement python=3.12.14 -y
+conda activate pavement
+```
+
+PyTorch/torchvision cu121 wheels were transferred from the local machine and installed without internet access:
+
+```bash
+pip install --no-index /path/to/torch-2.5.1+cu121.whl
+pip install --no-index /path/to/torchvision-0.20.1+cu121.whl
+```
+
+Ultralytics and its non-PyTorch dependencies were similarly transferred as wheels and installed offline.
+
+Verification:
+
+```bash
+python -c "import torch; print('PyTorch:', torch.__version__); print('CUDA build:', torch.version.cuda); print('CUDA available:', torch.cuda.is_available()); print('GPU:', torch.cuda.get_device_name(0))"
+yolo checks
+```
+
+Working result:
+
+```text
+PyTorch: 2.5.1+cu121
+CUDA build: 12.1
+CUDA available: True
+GPU: NVIDIA A30
+```
+
+### HPC dataset verification
+
+The processed dataset on HPC was checked as:
+
+```text
+Train images: 6945
+Val images:   763
+Test images:  1
+Train labels: 6945
+Val labels:   763
+Test labels:  1
+```
+
+Per-split image/label stem matching showed zero missing labels and zero orphan labels.
+
+Ultralytics reports 762 validation images / 656 instances during training while the filesystem contains 763 validation image files. This one-image discrepancy is recorded for later investigation and did not prevent training.
+
+### HPC inference and visual results
+
+Twenty validation images were sampled deterministically:
+
+```bash
+python -c "from pathlib import Path; import random; p=Path('datasets/pavement/images/val'); files=sorted(p.glob('*')); random.seed(0); print('\n'.join(str(x) for x in random.sample(files, min(20,len(files)))))" > /tmp/val20.txt
+```
+
+The trained best checkpoint was then used for inference:
+
+```bash
+yolo detect predict \
+    model=runs/detect/runs/pavement/yolov8n_baseline-2/weights/best.pt \
+    source=/tmp/val20.txt \
+    imgsz=640 \
+    conf=0.25 \
+    device=0 \
+    project=runs/pavement \
+    name=baseline_predictions \
+    save=True \
+    save_txt=True
+```
+
+Outputs were saved under:
+
+```text
+~/Pavement_Crack_Detection/runs/detect/runs/pavement/baseline_predictions/
+```
+
+The generated JPEGs are **qualitative outputs of the trained model**. They show predicted bounding boxes, class names, and confidence scores. These images can be shown to a mentor as visual evidence of the detection stage, together with the quantitative validation metrics.
+
+The predictions were copied to the local machine with:
+
+```bash
+scp -r rajatb@192.168.1.133:~/Pavement_Crack_Detection/runs/detect/runs/pavement/baseline_predictions/ \
+~/IIT_PKD/Pavement_Crack_Detection/predictions/
+```
 
 ### Important usage rule
 
@@ -431,3 +605,22 @@ The project currently does **not** have a trained checkpoint; inference can be s
 ---
 
 *End of README*
+
+---
+
+## Experiment summary — 2026-09-03
+
+**Baseline:** YOLOv8n object detector trained on the processed RDD2022 India subset.
+
+**Task:** Detect pavement defects with bounding boxes and classify them into four classes:
+`longitudinal_crack`, `transverse_crack`, `alligator_crack`, `pothole`.
+
+**Training:** 100 epochs, 640px input, AutoBatch, NVIDIA A30, approximately 1.035 hours.
+
+**Best checkpoint:** `runs/detect/runs/pavement/yolov8n_baseline-2/weights/best.pt`
+
+**Validation:** Precision 0.505, Recall 0.617, mAP50 0.599, mAP50-95 0.255.
+
+**Qualitative output:** 20 validation images were run through the trained model and saved with predicted bounding boxes/class labels/confidences.
+
+**Interpretation:** The first detection baseline is working, but it is not the final pavement measurement system. Thin cracks, class imbalance, false positives/overlapping boxes, and the very small transverse-crack validation sample are limitations. The next major research stage is defect segmentation, followed by camera/road-plane calibration and physical measurement.
