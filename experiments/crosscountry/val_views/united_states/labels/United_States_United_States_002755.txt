@@ -1,0 +1,1 @@
+/home/rajatb/Pavement_Crack_Detection/datasets/pavement_crosscountry/labels/val/United_States_United_States_002755.txt

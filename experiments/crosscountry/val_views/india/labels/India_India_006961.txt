@@ -1,0 +1,1 @@
+/home/rajatb/Pavement_Crack_Detection/datasets/pavement_crosscountry/labels/val/India_India_006961.txt

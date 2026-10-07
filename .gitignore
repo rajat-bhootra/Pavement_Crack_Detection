@@ -20,6 +20,9 @@ models/*.onnx
 # Processed dataset images and labels
 datasets/pavement/images/
 datasets/pavement/labels/
+datasets/pavement_crosscountry/
+datasets/pavement_crosscountry_india/
+datasets/pavement_multicountry/
 
 # Dataset caches
 *.cache
